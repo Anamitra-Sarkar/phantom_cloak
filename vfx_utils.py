@@ -1,0 +1,245 @@
+"""
+VFX Utilities for PHANTOM-CLOAK
+Real-Time Optical Camouflage System
+
+This module contains mathematical functions for distortion and shimmer effects.
+"""
+
+import cv2
+import numpy as np
+
+
+def detect_edges(mask: np.ndarray, low_threshold: int = 50, high_threshold: int = 150) -> np.ndarray:
+    """
+    Detect edges in the segmentation mask using Canny edge detection.
+    
+    Args:
+        mask: Binary segmentation mask (0-255)
+        low_threshold: Lower threshold for Canny edge detection
+        high_threshold: Upper threshold for Canny edge detection
+    
+    Returns:
+        Edge mask with detected edges
+    """
+    if len(mask.shape) == 3:
+        mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
+    
+    mask_uint8 = (mask * 255).astype(np.uint8) if mask.max() <= 1 else mask.astype(np.uint8)
+    edges = cv2.Canny(mask_uint8, low_threshold, high_threshold)
+    return edges
+
+
+def create_displacement_maps(height: int, width: int, edges: np.ndarray, 
+                              displacement_strength: float = 10.0,
+                              time_offset: float = 0.0) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Create displacement maps for light bending effect.
+    
+    Args:
+        height: Frame height
+        width: Frame width
+        edges: Edge mask from detect_edges
+        displacement_strength: Strength of the displacement effect
+        time_offset: Time offset for animated shimmer effect
+    
+    Returns:
+        Tuple of (map_x, map_y) for cv2.remap
+    """
+    x_coords, y_coords = np.meshgrid(np.arange(width), np.arange(height))
+    x_coords = x_coords.astype(np.float32)
+    y_coords = y_coords.astype(np.float32)
+    
+    dilated_edges = cv2.dilate(edges, np.ones((15, 15), np.uint8), iterations=2)
+    edge_region = dilated_edges.astype(np.float32) / 255.0
+    
+    noise_x = np.sin(y_coords * 0.1 + time_offset) * displacement_strength
+    noise_y = np.cos(x_coords * 0.1 + time_offset) * displacement_strength
+    
+    map_x = x_coords + noise_x * edge_region
+    map_y = y_coords + noise_y * edge_region
+    
+    map_x = np.clip(map_x, 0, width - 1)
+    map_y = np.clip(map_y, 0, height - 1)
+    
+    return map_x, map_y
+
+
+def apply_predator_shimmer(frame: np.ndarray, background: np.ndarray, 
+                           mask: np.ndarray, edges: np.ndarray,
+                           time_offset: float = 0.0,
+                           shimmer_intensity: float = 0.3,
+                           refraction_index: float = 1.4) -> np.ndarray:
+    """
+    Apply the Predator-style shimmer distortion effect.
+    
+    This simulates light bending around the cloaked figure by:
+    1. Applying displacement to the background at edge regions
+    2. Blending with slight transparency for the shimmer effect
+    3. Adding chromatic aberration for realism
+    
+    Args:
+        frame: Current camera frame
+        background: Captured background plate
+        mask: Segmentation mask (normalized 0-1)
+        edges: Detected edges from the mask
+        time_offset: Time for animated effects
+        shimmer_intensity: Intensity of the shimmer effect (0-1)
+        refraction_index: Simulated refraction index for distortion strength
+    
+    Returns:
+        Processed frame with predator shimmer effect
+    """
+    height, width = frame.shape[:2]
+    
+    displacement_strength = (refraction_index - 1.0) * 25.0
+    
+    map_x, map_y = create_displacement_maps(
+        height, width, edges, 
+        displacement_strength=displacement_strength,
+        time_offset=time_offset
+    )
+    
+    distorted_bg = cv2.remap(background, map_x, map_y, 
+                              cv2.INTER_LINEAR, 
+                              borderMode=cv2.BORDER_REFLECT)
+    
+    chromatic_offset = int(displacement_strength * 0.3)
+    if chromatic_offset > 0:
+        b, g, r = cv2.split(distorted_bg)
+        rows, cols = b.shape
+        
+        shift_matrix_r = np.float32([[1, 0, chromatic_offset], [0, 1, 0]])
+        shift_matrix_b = np.float32([[1, 0, -chromatic_offset], [0, 1, 0]])
+        
+        r = cv2.warpAffine(r, shift_matrix_r, (cols, rows))
+        b = cv2.warpAffine(b, shift_matrix_b, (cols, rows))
+        
+        distorted_bg = cv2.merge([b, g, r])
+    
+    mask_3ch = np.stack([mask] * 3, axis=-1)
+    
+    dilated_edges = cv2.dilate(edges, np.ones((7, 7), np.uint8), iterations=1)
+    edge_mask = dilated_edges.astype(np.float32) / 255.0
+    edge_mask_3ch = np.stack([edge_mask] * 3, axis=-1)
+    
+    cloak_result = distorted_bg * mask_3ch + frame * (1 - mask_3ch)
+    
+    shimmer_noise = (np.sin(time_offset * 5) + 1) * 0.5 * shimmer_intensity
+    shimmer_blend = cloak_result * (1 - edge_mask_3ch * shimmer_noise) + \
+                    frame * (edge_mask_3ch * shimmer_noise)
+    
+    return shimmer_blend.astype(np.uint8)
+
+
+def apply_absolute_invisibility(frame: np.ndarray, background: np.ndarray,
+                                 mask: np.ndarray, threshold: float = 0.5) -> np.ndarray:
+    """
+    Apply absolute invisibility effect - clean background replacement.
+    
+    Args:
+        frame: Current camera frame
+        background: Captured background plate
+        mask: Segmentation mask (normalized 0-1)
+        threshold: Threshold for mask application
+    
+    Returns:
+        Frame with person replaced by background
+    """
+    binary_mask = (mask > threshold).astype(np.float32)
+    
+    blurred_mask = cv2.GaussianBlur(binary_mask, (21, 21), 0)
+    mask_3ch = np.stack([blurred_mask] * 3, axis=-1)
+    
+    result = background * mask_3ch + frame * (1 - mask_3ch)
+    
+    return result.astype(np.uint8)
+
+
+def refine_mask(mask: np.ndarray, blur_size: int = 15) -> np.ndarray:
+    """
+    Refine the segmentation mask for seamless blending.
+    
+    Args:
+        mask: Raw segmentation mask
+        blur_size: Size of Gaussian blur kernel (must be odd)
+    
+    Returns:
+        Refined mask with soft edges
+    """
+    if blur_size % 2 == 0:
+        blur_size += 1
+    
+    refined = cv2.GaussianBlur(mask, (blur_size, blur_size), 0)
+    
+    return refined
+
+
+def create_hud_overlay(frame: np.ndarray, mode: str, refraction_index: float,
+                       fps: float, calibrating: bool = False,
+                       countdown: int = 0) -> np.ndarray:
+    """
+    Create the military prototype HUD overlay.
+    
+    Args:
+        frame: Current frame to overlay HUD on
+        mode: Current mode ("ABSOLUTE" or "PREDATOR")
+        refraction_index: Current refraction index value
+        fps: Current FPS
+        calibrating: Whether calibration is in progress
+        countdown: Countdown timer for calibration
+    
+    Returns:
+        Frame with HUD overlay
+    """
+    height, width = frame.shape[:2]
+    overlay = frame.copy()
+    
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = 0.6
+    thickness = 2
+    
+    green = (0, 255, 0)
+    dark_green = (0, 180, 0)
+    red = (0, 0, 255)
+    
+    corner_size = 50
+    corner_thickness = 2
+    cv2.line(overlay, (10, 10), (10 + corner_size, 10), green, corner_thickness)
+    cv2.line(overlay, (10, 10), (10, 10 + corner_size), green, corner_thickness)
+    cv2.line(overlay, (width - 10, 10), (width - 10 - corner_size, 10), green, corner_thickness)
+    cv2.line(overlay, (width - 10, 10), (width - 10, 10 + corner_size), green, corner_thickness)
+    cv2.line(overlay, (10, height - 10), (10 + corner_size, height - 10), green, corner_thickness)
+    cv2.line(overlay, (10, height - 10), (10, height - 10 - corner_size), green, corner_thickness)
+    cv2.line(overlay, (width - 10, height - 10), (width - 10 - corner_size, height - 10), green, corner_thickness)
+    cv2.line(overlay, (width - 10, height - 10), (width - 10, height - 10 - corner_size), green, corner_thickness)
+    
+    if calibrating:
+        cal_text = f"CLEAR THE FRAME. CAPTURING BACKGROUND IN {countdown}..."
+        text_size = cv2.getTextSize(cal_text, font, 0.8, 2)[0]
+        text_x = (width - text_size[0]) // 2
+        text_y = height // 2
+        cv2.putText(overlay, cal_text, (text_x, text_y), font, 0.8, red, 2)
+    else:
+        cv2.putText(overlay, "PHANTOM-CLOAK v1.0", (20, 35), font, font_scale, green, thickness)
+        cv2.putText(overlay, "ACTIVE CAMO: ENABLED", (20, 60), font, font_scale - 0.1, green, 1)
+        
+        mode_text = f"MODE: {mode}"
+        cv2.putText(overlay, mode_text, (20, 85), font, font_scale - 0.1, dark_green, 1)
+        
+        refraction_text = f"REFRACTION INDEX: {refraction_index:.1f}"
+        cv2.putText(overlay, refraction_text, (20, 110), font, font_scale - 0.1, dark_green, 1)
+        
+        fps_text = f"FPS: {fps:.1f}"
+        fps_size = cv2.getTextSize(fps_text, font, font_scale - 0.1, 1)[0]
+        cv2.putText(overlay, fps_text, (width - fps_size[0] - 20, 35), font, font_scale - 0.1, green, 1)
+        
+        controls_y = height - 30
+        cv2.putText(overlay, "[C] RECALIBRATE", (20, controls_y), font, 0.4, dark_green, 1)
+        cv2.putText(overlay, "[M] SWITCH MODE", (180, controls_y), font, 0.4, dark_green, 1)
+        cv2.putText(overlay, "[Q] QUIT", (340, controls_y), font, 0.4, dark_green, 1)
+    
+    for i in range(0, width, 4):
+        if i % 8 == 0:
+            overlay[height - 5:height - 3, i:i+2] = green
+    
+    return overlay
