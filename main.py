@@ -33,6 +33,9 @@ class PhantomCloak:
     MODE_ABSOLUTE = "ABSOLUTE"
     MODE_PREDATOR = "PREDATOR"
     
+    # MediaPipe Selfie Segmentation model selection:
+    # 0 = General model (slower but works for multiple people)
+    # 1 = Landscape model (faster, optimized for single person)
     SEGMENTATION_MODEL = 1
     
     def __init__(self, camera_id: int = 0, target_width: int = 640, target_height: int = 480):
@@ -131,7 +134,9 @@ class PhantomCloak:
                     return False
         
         print("Capturing background frames...")
-        frames = []
+        
+        # Use running average to reduce memory usage instead of storing all frames
+        running_sum: Optional[np.ndarray] = None
         
         for i in range(self.CALIBRATION_FRAMES):
             ret, frame = self.cap.read()
@@ -139,7 +144,12 @@ class PhantomCloak:
                 return False
             
             frame = cv2.flip(frame, 1)
-            frames.append(frame.astype(np.float32))
+            
+            # Accumulate frames using running sum for memory efficiency
+            if running_sum is None:
+                running_sum = frame.astype(np.float64)
+            else:
+                running_sum += frame.astype(np.float64)
             
             progress = int((i + 1) / self.CALIBRATION_FRAMES * 100)
             display = frame.copy()
@@ -148,7 +158,8 @@ class PhantomCloak:
             cv2.imshow("PHANTOM-CLOAK", display)
             cv2.waitKey(1)
         
-        self.background_plate = np.mean(frames, axis=0).astype(np.uint8)
+        # Calculate average from running sum
+        self.background_plate = (running_sum / self.CALIBRATION_FRAMES).astype(np.uint8)
         print("Background calibration complete!")
         
         return True

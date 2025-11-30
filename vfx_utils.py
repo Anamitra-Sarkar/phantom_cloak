@@ -8,6 +8,13 @@ This module contains mathematical functions for distortion and shimmer effects.
 import cv2
 import numpy as np
 
+# HUD Scanline effect constants
+HUD_SCANLINE_STEP = 4       # Step between scanlines
+HUD_SCANLINE_MODULO = 8     # Modulo for alternating scanlines
+HUD_SCANLINE_TOP = 5        # Pixels from bottom for scanline top
+HUD_SCANLINE_BOTTOM = 3     # Pixels from bottom for scanline bottom
+HUD_SCANLINE_WIDTH = 2      # Width of each scanline segment
+
 
 def detect_edges(mask: np.ndarray, low_threshold: int = 50, high_threshold: int = 150) -> np.ndarray:
     """
@@ -238,8 +245,10 @@ def create_hud_overlay(frame: np.ndarray, mode: str, refraction_index: float,
         cv2.putText(overlay, "[M] SWITCH MODE", (180, controls_y), font, 0.4, dark_green, 1)
         cv2.putText(overlay, "[Q] QUIT", (340, controls_y), font, 0.4, dark_green, 1)
     
-    for i in range(0, width, 4):
-        if i % 8 == 0:
-            overlay[height - 5:height - 3, i:i+2] = green
+    # Draw HUD scanline effect at bottom of frame
+    for i in range(0, width, HUD_SCANLINE_STEP):
+        if i % HUD_SCANLINE_MODULO == 0:
+            overlay[height - HUD_SCANLINE_TOP:height - HUD_SCANLINE_BOTTOM, 
+                    i:i + HUD_SCANLINE_WIDTH] = green
     
     return overlay
