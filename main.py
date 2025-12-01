@@ -219,6 +219,8 @@ class PhantomCloak:
         
         # Calculate FPS based on time span of frames in deque
         # Note: N timestamps = N frames captured, so FPS = N / time_span
+        # This properly handles variable frame rates - the deque maintains a sliding
+        # window of the most recent frames, and we calculate actual FPS from real time span
         if len(self.frame_times) >= 2:
             time_span = current_time - self.frame_times[0]
             # Use minimum threshold to prevent unrealistically high FPS from small time spans
