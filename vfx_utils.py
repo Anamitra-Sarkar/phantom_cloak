@@ -65,8 +65,11 @@ def create_displacement_maps(height: int, width: int, edges: np.ndarray,
         Tuple of (map_x, map_y) for cv2.remap
     """
     # Use cached meshgrid coordinates to avoid recreation
+    # Add reasonable bounds check to prevent memory issues with extreme dimensions
     cache_key = (height, width)
-    if cache_key not in _meshgrid_cache:
+    use_cache = (height <= 10000 and width <= 10000)  # Skip cache for very large dimensions
+    
+    if use_cache and cache_key not in _meshgrid_cache:
         # Implement LRU-style cache eviction before adding if at capacity
         if len(_meshgrid_cache) >= _MESHGRID_CACHE_MAX_SIZE:
             _meshgrid_cache.popitem(last=False)  # Remove oldest item
@@ -74,10 +77,14 @@ def create_displacement_maps(height: int, width: int, edges: np.ndarray,
         x_coords, y_coords = np.meshgrid(np.arange(width, dtype=np.float32), 
                                          np.arange(height, dtype=np.float32))
         _meshgrid_cache[cache_key] = (x_coords, y_coords)
-    else:
+    elif use_cache:
         # Move to end to mark as recently used
         _meshgrid_cache.move_to_end(cache_key)
         x_coords, y_coords = _meshgrid_cache[cache_key]
+    else:
+        # Skip caching for very large dimensions to prevent memory issues
+        x_coords, y_coords = np.meshgrid(np.arange(width, dtype=np.float32), 
+                                         np.arange(height, dtype=np.float32))
     
     # Use pre-dilated edges if provided to avoid redundant dilation
     if dilated_edges is None:

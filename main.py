@@ -217,6 +217,7 @@ class PhantomCloak:
         self.frame_times.append(current_time)
         
         # Calculate FPS based on time span of frames in deque
+        # Note: N timestamps = N frames captured, so FPS = N / time_span
         if len(self.frame_times) >= 2:
             time_span = current_time - self.frame_times[0]
             # Use minimum threshold to prevent unrealistically high FPS from small time spans
