@@ -65,7 +65,7 @@ class PhantomCloak:
         self.time_offset = 0.0
         self.fps = 0.0
         # Use deque with maxlen for efficient FPS calculation
-        self.frame_times: deque = deque(maxlen=self.FPS_CALCULATION_WINDOW)
+        self.frame_times: deque[float] = deque(maxlen=self.FPS_CALCULATION_WINDOW)
         
     def initialize_camera(self) -> bool:
         """

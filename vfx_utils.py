@@ -67,13 +67,13 @@ def create_displacement_maps(height: int, width: int, edges: np.ndarray,
     # Use cached meshgrid coordinates to avoid recreation
     cache_key = (height, width)
     if cache_key not in _meshgrid_cache:
+        # Implement LRU-style cache eviction before adding if at capacity
+        if len(_meshgrid_cache) >= _MESHGRID_CACHE_MAX_SIZE:
+            _meshgrid_cache.popitem(last=False)  # Remove oldest item
+        
         x_coords, y_coords = np.meshgrid(np.arange(width, dtype=np.float32), 
                                          np.arange(height, dtype=np.float32))
         _meshgrid_cache[cache_key] = (x_coords, y_coords)
-        
-        # Implement LRU-style cache eviction if cache grows too large
-        if len(_meshgrid_cache) > _MESHGRID_CACHE_MAX_SIZE:
-            _meshgrid_cache.popitem(last=False)  # Remove oldest item
     else:
         # Move to end to mark as recently used
         _meshgrid_cache.move_to_end(cache_key)
