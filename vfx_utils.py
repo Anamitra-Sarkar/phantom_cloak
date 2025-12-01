@@ -17,6 +17,7 @@ _meshgrid_cache = OrderedDict()
 
 # Pre-computed constants for performance
 _INV_255 = 1.0 / 255.0  # Avoid repeated division calculations
+_MAX_CACHEABLE_DIMENSION = 10000  # Maximum dimension for meshgrid caching
 
 # HUD Scanline effect constants
 HUD_SCANLINE_STEP = 4       # Step between scanlines
@@ -67,7 +68,7 @@ def create_displacement_maps(height: int, width: int, edges: np.ndarray,
     # Use cached meshgrid coordinates to avoid recreation
     # Add reasonable bounds check to prevent memory issues with extreme dimensions
     cache_key = (height, width)
-    use_cache = (height <= 10000 and width <= 10000)  # Skip cache for very large dimensions
+    use_cache = (height <= _MAX_CACHEABLE_DIMENSION and width <= _MAX_CACHEABLE_DIMENSION)
     
     if use_cache and cache_key not in _meshgrid_cache:
         # Implement LRU-style cache eviction before adding if at capacity
@@ -154,8 +155,8 @@ def apply_predator_shimmer(frame: np.ndarray, background: np.ndarray,
         shift_matrix_r = np.float32([[1, 0, chromatic_offset], [0, 1, 0]])
         shift_matrix_b = np.float32([[1, 0, -chromatic_offset], [0, 1, 0]])
         
-        r = cv2.warpAffine(r, shift_matrix_r, (cols, rows), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
-        b = cv2.warpAffine(b, shift_matrix_b, (cols, rows), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+        r = cv2.warpAffine(r, shift_matrix_r, (cols, rows), borderMode=cv2.BORDER_REPLICATE)
+        b = cv2.warpAffine(b, shift_matrix_b, (cols, rows), borderMode=cv2.BORDER_REPLICATE)
         
         distorted_bg = cv2.merge([b, g, r])
     

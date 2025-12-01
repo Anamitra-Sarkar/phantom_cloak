@@ -31,6 +31,7 @@ class PhantomCloak:
     CALIBRATION_FRAMES = 30
     CALIBRATION_COUNTDOWN = 3
     FPS_CALCULATION_WINDOW = 30  # Number of frames to use for FPS calculation
+    MIN_FPS_TIME_THRESHOLD = 0.001  # Minimum time span (seconds) to prevent inflated FPS
     
     MODE_ABSOLUTE = "ABSOLUTE"
     MODE_PREDATOR = "PREDATOR"
@@ -221,7 +222,7 @@ class PhantomCloak:
         if len(self.frame_times) >= 2:
             time_span = current_time - self.frame_times[0]
             # Use minimum threshold to prevent unrealistically high FPS from small time spans
-            if time_span > 0.001:
+            if time_span > self.MIN_FPS_TIME_THRESHOLD:
                 self.fps = len(self.frame_times) / time_span
             # If time_span is too small or negative, keep previous FPS value
     
