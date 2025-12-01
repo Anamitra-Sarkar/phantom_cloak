@@ -219,9 +219,10 @@ class PhantomCloak:
         # Calculate FPS based on time span of frames in deque
         if len(self.frame_times) >= 2:
             time_span = current_time - self.frame_times[0]
-            if time_span > 0:
+            # Use minimum threshold to prevent unrealistically high FPS from small time spans
+            if time_span > 0.001:
                 self.fps = len(self.frame_times) / time_span
-            # If time_span is 0 or negative, keep previous FPS value
+            # If time_span is too small or negative, keep previous FPS value
     
     def toggle_mode(self) -> None:
         """Toggle between invisibility modes."""

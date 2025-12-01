@@ -11,8 +11,12 @@ from collections import OrderedDict
 
 # Cache for meshgrid coordinates to avoid recreation
 # Using OrderedDict with max size to prevent unbounded memory growth
+# Note: This cache is not thread-safe. If using in multi-threaded context, add synchronization.
 _MESHGRID_CACHE_MAX_SIZE = 10  # Reasonable limit for different resolutions
 _meshgrid_cache = OrderedDict()
+
+# Pre-computed constants for performance
+_INV_255 = 1.0 / 255.0  # Avoid repeated division calculations
 
 # HUD Scanline effect constants
 HUD_SCANLINE_STEP = 4       # Step between scanlines
@@ -79,7 +83,7 @@ def create_displacement_maps(height: int, width: int, edges: np.ndarray,
     if dilated_edges is None:
         dilated_edges = cv2.dilate(edges, np.ones((15, 15), np.uint8), iterations=2)
     
-    edge_region = dilated_edges * (1.0 / 255.0)  # Optimized division
+    edge_region = dilated_edges * _INV_255
     
     # Pre-compute displacement with efficient operations
     noise_x = np.sin(y_coords * 0.1 + time_offset) * displacement_strength
@@ -153,7 +157,7 @@ def apply_predator_shimmer(frame: np.ndarray, background: np.ndarray,
     
     # Use smaller dilation for edge shimmer effect
     dilated_edges_small = cv2.dilate(edges, np.ones((7, 7), np.uint8), iterations=1)
-    edge_mask = dilated_edges_small * (1.0 / 255.0)  # Optimized division
+    edge_mask = dilated_edges_small * _INV_255
     edge_mask_3ch = np.dstack([edge_mask, edge_mask, edge_mask])
     
     # Vectorized blending operations
