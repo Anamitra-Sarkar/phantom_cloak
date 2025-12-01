@@ -10,6 +10,7 @@ light-bending distortion effects.
 import time
 import sys
 from typing import Optional
+from collections import deque
 
 import cv2
 import numpy as np
@@ -62,7 +63,8 @@ class PhantomCloak:
         
         self.time_offset = 0.0
         self.fps = 0.0
-        self.frame_times: list[float] = []
+        # Use deque with maxlen for efficient FPS calculation
+        self.frame_times: deque = deque(maxlen=30)
         
     def initialize_camera(self) -> bool:
         """
@@ -209,14 +211,15 @@ class PhantomCloak:
         return result
     
     def update_fps(self) -> None:
-        """Update FPS calculation."""
+        """Update FPS calculation using efficient deque."""
         current_time = time.time()
         self.frame_times.append(current_time)
         
-        self.frame_times = [t for t in self.frame_times if current_time - t < 1.0]
-        
-        if len(self.frame_times) > 1:
-            self.fps = len(self.frame_times)
+        # Calculate FPS based on time span of frames in deque
+        if len(self.frame_times) >= 2:
+            time_span = current_time - self.frame_times[0]
+            if time_span > 0:
+                self.fps = len(self.frame_times) / time_span
     
     def toggle_mode(self) -> None:
         """Toggle between invisibility modes."""
