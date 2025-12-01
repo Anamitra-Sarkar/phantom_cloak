@@ -73,8 +73,8 @@ def create_displacement_maps(height: int, width: int, edges: np.ndarray,
     edge_region = dilated_edges * (1.0 / 255.0)  # Optimized division
     
     # Pre-compute displacement with efficient operations
-    noise_x = np.sin(y_coords * 0.1 + time_offset, dtype=np.float32) * displacement_strength
-    noise_y = np.cos(x_coords * 0.1 + time_offset, dtype=np.float32) * displacement_strength
+    noise_x = np.sin(y_coords * 0.1 + time_offset) * displacement_strength
+    noise_y = np.cos(x_coords * 0.1 + time_offset) * displacement_strength
     
     # In-place operations where possible
     map_x = np.clip(x_coords + noise_x * edge_region, 0, width - 1)
@@ -194,8 +194,9 @@ def refine_mask(mask: np.ndarray, blur_size: int = 15) -> np.ndarray:
     Returns:
         Refined mask with soft edges
     """
-    # Ensure blur_size is odd (bitwise OR with 1)
-    blur_size = blur_size | 1
+    # Ensure blur_size is odd
+    if blur_size % 2 == 0:
+        blur_size += 1
     
     refined = cv2.GaussianBlur(mask, (blur_size, blur_size), 0)
     
