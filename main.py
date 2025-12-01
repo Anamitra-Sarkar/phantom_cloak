@@ -30,6 +30,7 @@ class PhantomCloak:
     
     CALIBRATION_FRAMES = 30
     CALIBRATION_COUNTDOWN = 3
+    FPS_CALCULATION_WINDOW = 30  # Number of frames to use for FPS calculation
     
     MODE_ABSOLUTE = "ABSOLUTE"
     MODE_PREDATOR = "PREDATOR"
@@ -64,7 +65,7 @@ class PhantomCloak:
         self.time_offset = 0.0
         self.fps = 0.0
         # Use deque with maxlen for efficient FPS calculation
-        self.frame_times: deque = deque(maxlen=30)
+        self.frame_times: deque = deque(maxlen=self.FPS_CALCULATION_WINDOW)
         
     def initialize_camera(self) -> bool:
         """
@@ -220,6 +221,7 @@ class PhantomCloak:
             time_span = current_time - self.frame_times[0]
             if time_span > 0:
                 self.fps = len(self.frame_times) / time_span
+            # If time_span is 0 or negative, keep previous FPS value
     
     def toggle_mode(self) -> None:
         """Toggle between invisibility modes."""

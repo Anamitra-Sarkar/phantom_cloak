@@ -7,9 +7,12 @@ This module contains mathematical functions for distortion and shimmer effects.
 
 import cv2
 import numpy as np
+from collections import OrderedDict
 
 # Cache for meshgrid coordinates to avoid recreation
-_meshgrid_cache = {}
+# Using OrderedDict with max size to prevent unbounded memory growth
+_MESHGRID_CACHE_MAX_SIZE = 10  # Reasonable limit for different resolutions
+_meshgrid_cache = OrderedDict()
 
 # HUD Scanline effect constants
 HUD_SCANLINE_STEP = 4       # Step between scanlines
@@ -63,7 +66,13 @@ def create_displacement_maps(height: int, width: int, edges: np.ndarray,
         x_coords, y_coords = np.meshgrid(np.arange(width, dtype=np.float32), 
                                          np.arange(height, dtype=np.float32))
         _meshgrid_cache[cache_key] = (x_coords, y_coords)
+        
+        # Implement LRU-style cache eviction if cache grows too large
+        if len(_meshgrid_cache) > _MESHGRID_CACHE_MAX_SIZE:
+            _meshgrid_cache.popitem(last=False)  # Remove oldest item
     else:
+        # Move to end to mark as recently used
+        _meshgrid_cache.move_to_end(cache_key)
         x_coords, y_coords = _meshgrid_cache[cache_key]
     
     # Use pre-dilated edges if provided to avoid redundant dilation
