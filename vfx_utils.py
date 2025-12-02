@@ -7,6 +7,17 @@ This module contains mathematical functions for distortion and shimmer effects.
 
 import cv2
 import numpy as np
+from collections import OrderedDict
+
+# Cache for meshgrid coordinates to avoid recreation
+# Using OrderedDict with max size to prevent unbounded memory growth
+# Note: This cache is not thread-safe. If using in multi-threaded context, add synchronization.
+_MESHGRID_CACHE_MAX_SIZE = 10  # Reasonable limit for different resolutions
+_meshgrid_cache = OrderedDict()
+
+# Pre-computed constants for performance
+_INV_255 = 1.0 / 255.0  # Avoid repeated division calculations
+_MAX_CACHEABLE_DIMENSION = 10000  # Maximum dimension for meshgrid caching
 
 # HUD Scanline effect constants
 HUD_SCANLINE_STEP = 4       # Step between scanlines
@@ -38,7 +49,8 @@ def detect_edges(mask: np.ndarray, low_threshold: int = 50, high_threshold: int 
 
 def create_displacement_maps(height: int, width: int, edges: np.ndarray, 
                               displacement_strength: float = 10.0,
-                              time_offset: float = 0.0) -> tuple[np.ndarray, np.ndarray]:
+                              time_offset: float = 0.0,
+                              dilated_edges: np.ndarray = None) -> tuple[np.ndarray, np.ndarray]:
     """
     Create displacement maps for light bending effect.
     
@@ -48,25 +60,46 @@ def create_displacement_maps(height: int, width: int, edges: np.ndarray,
         edges: Edge mask from detect_edges
         displacement_strength: Strength of the displacement effect
         time_offset: Time offset for animated shimmer effect
+        dilated_edges: Pre-dilated edges (optional, to avoid redundant dilation)
     
     Returns:
         Tuple of (map_x, map_y) for cv2.remap
     """
-    x_coords, y_coords = np.meshgrid(np.arange(width), np.arange(height))
-    x_coords = x_coords.astype(np.float32)
-    y_coords = y_coords.astype(np.float32)
+    # Use cached meshgrid coordinates to avoid recreation
+    # Add reasonable bounds check to prevent memory issues with extreme dimensions
+    cache_key = (height, width)
+    use_cache = (height <= _MAX_CACHEABLE_DIMENSION and width <= _MAX_CACHEABLE_DIMENSION)
     
-    dilated_edges = cv2.dilate(edges, np.ones((15, 15), np.uint8), iterations=2)
-    edge_region = dilated_edges.astype(np.float32) / 255.0
+    if use_cache and cache_key not in _meshgrid_cache:
+        # Implement LRU-style cache eviction before adding if at capacity
+        if len(_meshgrid_cache) >= _MESHGRID_CACHE_MAX_SIZE:
+            _meshgrid_cache.popitem(last=False)  # Remove oldest item
+        
+        x_coords, y_coords = np.meshgrid(np.arange(width, dtype=np.float32), 
+                                         np.arange(height, dtype=np.float32))
+        _meshgrid_cache[cache_key] = (x_coords, y_coords)
+    elif use_cache:
+        # Move to end to mark as recently used
+        _meshgrid_cache.move_to_end(cache_key)
+        x_coords, y_coords = _meshgrid_cache[cache_key]
+    else:
+        # Skip caching for very large dimensions to prevent memory issues
+        x_coords, y_coords = np.meshgrid(np.arange(width, dtype=np.float32), 
+                                         np.arange(height, dtype=np.float32))
     
+    # Use pre-dilated edges if provided to avoid redundant dilation
+    if dilated_edges is None:
+        dilated_edges = cv2.dilate(edges, np.ones((15, 15), np.uint8), iterations=2)
+    
+    edge_region = dilated_edges * _INV_255
+    
+    # Pre-compute displacement with efficient operations
     noise_x = np.sin(y_coords * 0.1 + time_offset) * displacement_strength
     noise_y = np.cos(x_coords * 0.1 + time_offset) * displacement_strength
     
-    map_x = x_coords + noise_x * edge_region
-    map_y = y_coords + noise_y * edge_region
-    
-    map_x = np.clip(map_x, 0, width - 1)
-    map_y = np.clip(map_y, 0, height - 1)
+    # In-place operations where possible
+    map_x = np.clip(x_coords + noise_x * edge_region, 0, width - 1)
+    map_y = np.clip(y_coords + noise_y * edge_region, 0, height - 1)
     
     return map_x, map_y
 
@@ -100,10 +133,14 @@ def apply_predator_shimmer(frame: np.ndarray, background: np.ndarray,
     
     displacement_strength = (refraction_index - 1.0) * 25.0
     
+    # Pre-dilate edges once for both displacement and shimmer
+    dilated_edges_large = cv2.dilate(edges, np.ones((15, 15), np.uint8), iterations=2)
+    
     map_x, map_y = create_displacement_maps(
         height, width, edges, 
         displacement_strength=displacement_strength,
-        time_offset=time_offset
+        time_offset=time_offset,
+        dilated_edges=dilated_edges_large
     )
     
     distorted_bg = cv2.remap(background, map_x, map_y, 
@@ -118,21 +155,24 @@ def apply_predator_shimmer(frame: np.ndarray, background: np.ndarray,
         shift_matrix_r = np.float32([[1, 0, chromatic_offset], [0, 1, 0]])
         shift_matrix_b = np.float32([[1, 0, -chromatic_offset], [0, 1, 0]])
         
-        r = cv2.warpAffine(r, shift_matrix_r, (cols, rows))
-        b = cv2.warpAffine(b, shift_matrix_b, (cols, rows))
+        r = cv2.warpAffine(r, shift_matrix_r, (cols, rows), borderMode=cv2.BORDER_REPLICATE)
+        b = cv2.warpAffine(b, shift_matrix_b, (cols, rows), borderMode=cv2.BORDER_REPLICATE)
         
         distorted_bg = cv2.merge([b, g, r])
     
-    mask_3ch = np.stack([mask] * 3, axis=-1)
+    # Optimize mask expansion using dstack instead of stack
+    mask_3ch = np.dstack([mask, mask, mask])
     
-    dilated_edges = cv2.dilate(edges, np.ones((7, 7), np.uint8), iterations=1)
-    edge_mask = dilated_edges.astype(np.float32) / 255.0
-    edge_mask_3ch = np.stack([edge_mask] * 3, axis=-1)
+    # Use smaller dilation for edge shimmer effect
+    dilated_edges_small = cv2.dilate(edges, np.ones((7, 7), np.uint8), iterations=1)
+    edge_mask = dilated_edges_small * _INV_255
+    edge_mask_3ch = np.dstack([edge_mask, edge_mask, edge_mask])
     
-    cloak_result = distorted_bg * mask_3ch + frame * (1 - mask_3ch)
+    # Vectorized blending operations
+    cloak_result = distorted_bg * mask_3ch + frame * (1.0 - mask_3ch)
     
-    shimmer_noise = (np.sin(time_offset * 5) + 1) * 0.5 * shimmer_intensity
-    shimmer_blend = cloak_result * (1 - edge_mask_3ch * shimmer_noise) + \
+    shimmer_noise = (np.sin(time_offset * 5.0) + 1.0) * 0.5 * shimmer_intensity
+    shimmer_blend = cloak_result * (1.0 - edge_mask_3ch * shimmer_noise) + \
                     frame * (edge_mask_3ch * shimmer_noise)
     
     return shimmer_blend.astype(np.uint8)
@@ -155,9 +195,11 @@ def apply_absolute_invisibility(frame: np.ndarray, background: np.ndarray,
     binary_mask = (mask > threshold).astype(np.float32)
     
     blurred_mask = cv2.GaussianBlur(binary_mask, (21, 21), 0)
-    mask_3ch = np.stack([blurred_mask] * 3, axis=-1)
+    # Use dstack for better performance than stack
+    mask_3ch = np.dstack([blurred_mask, blurred_mask, blurred_mask])
     
-    result = background * mask_3ch + frame * (1 - mask_3ch)
+    # Vectorized blending
+    result = background * mask_3ch + frame * (1.0 - mask_3ch)
     
     return result.astype(np.uint8)
 
@@ -173,6 +215,7 @@ def refine_mask(mask: np.ndarray, blur_size: int = 15) -> np.ndarray:
     Returns:
         Refined mask with soft edges
     """
+    # Ensure blur_size is odd
     if blur_size % 2 == 0:
         blur_size += 1
     

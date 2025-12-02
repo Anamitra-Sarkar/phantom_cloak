@@ -10,6 +10,7 @@ light-bending distortion effects.
 import time
 import sys
 from typing import Optional
+from collections import deque
 
 import cv2
 import numpy as np
@@ -29,6 +30,8 @@ class PhantomCloak:
     
     CALIBRATION_FRAMES = 30
     CALIBRATION_COUNTDOWN = 3
+    FPS_CALCULATION_WINDOW = 30  # Number of frames to use for FPS calculation
+    MIN_FPS_TIME_THRESHOLD = 0.001  # Minimum time span (seconds) to prevent inflated FPS
     
     MODE_ABSOLUTE = "ABSOLUTE"
     MODE_PREDATOR = "PREDATOR"
@@ -62,7 +65,8 @@ class PhantomCloak:
         
         self.time_offset = 0.0
         self.fps = 0.0
-        self.frame_times: list[float] = []
+        # Use deque with maxlen for efficient FPS calculation
+        self.frame_times: deque[float] = deque(maxlen=self.FPS_CALCULATION_WINDOW)
         
     def initialize_camera(self) -> bool:
         """
@@ -209,14 +213,20 @@ class PhantomCloak:
         return result
     
     def update_fps(self) -> None:
-        """Update FPS calculation."""
+        """Update FPS calculation using efficient deque."""
         current_time = time.time()
         self.frame_times.append(current_time)
         
-        self.frame_times = [t for t in self.frame_times if current_time - t < 1.0]
-        
-        if len(self.frame_times) > 1:
-            self.fps = len(self.frame_times)
+        # Calculate FPS based on time span of frames in deque
+        # Note: N timestamps = N frames captured, so FPS = N / time_span
+        # This properly handles variable frame rates - the deque maintains a sliding
+        # window of the most recent frames, and we calculate actual FPS from real time span
+        if len(self.frame_times) >= 2:
+            time_span = current_time - self.frame_times[0]
+            # Use minimum threshold to prevent unrealistically high FPS from small time spans
+            if time_span > self.MIN_FPS_TIME_THRESHOLD:
+                self.fps = len(self.frame_times) / time_span
+            # If time_span is too small or negative, keep previous FPS value
     
     def toggle_mode(self) -> None:
         """Toggle between invisibility modes."""
